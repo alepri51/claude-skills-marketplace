@@ -288,6 +288,7 @@ TOOLS: list[Tool] = [
             "page_id": {"type": "integer"},
             "file_id": {"type": "integer"},
             "filename": {"type": "string", "description": "Save filename (used for local path)"},
+            "save_dir": {"type": "string", "description": "Local directory for saving (default: $WIKI_DOWNLOAD_DIR/<page_id>). Caller-specific layouts (project planning artifacts, per-phase folders) should pass an explicit path here."},
         }, "required": ["page_id", "file_id", "filename"]}),
     Tool(name="attachment_download_by_slug",
         description="Download an attachment by slug + filename. Builds the .files/ URL automatically.",
@@ -295,6 +296,7 @@ TOOLS: list[Tool] = [
             "slug": {"type": "string"},
             "filename": {"type": "string"},
             "save_as": {"type": "string", "description": "Local filename override (default: same as filename)"},
+            "save_dir": {"type": "string", "description": "Local directory for saving (default: $WIKI_DOWNLOAD_DIR/<slug>). Caller-specific layouts (project planning artifacts, per-phase folders) should pass an explicit path here."},
         }, "required": ["slug", "filename"]}),
     Tool(name="page_upload_attachment",
         description="Upload a file as an attachment to a Wiki page (full pipeline: create session → upload → finish → attach).",
@@ -597,7 +599,11 @@ async def _dispatch(s, name, a):
 
     if name == "attachment_download_by_id":
         page_id = a["page_id"]; file_id = a["file_id"]; filename = a["filename"]
-        dest = Path(DOWNLOAD_DIR) / str(page_id) / filename
+        save_dir = a.get("save_dir")
+        if save_dir:
+            dest = Path(save_dir) / filename
+        else:
+            dest = Path(DOWNLOAD_DIR) / str(page_id) / filename
         st, err = await _download(s, f"/v1/pages/{page_id}/attachments/{file_id}/download", dest)
         if st != 200:
             return _err(st, err or f"Download failed for file {file_id}")
@@ -608,7 +614,11 @@ async def _dispatch(s, name, a):
         save_as = a.get("save_as", filename)
         url_param = f"{slug}/.files/{filename}"
         params = {"url": url_param, "download": "true"}
-        dest = Path(DOWNLOAD_DIR) / slug / save_as
+        save_dir = a.get("save_dir")
+        if save_dir:
+            dest = Path(save_dir) / save_as
+        else:
+            dest = Path(DOWNLOAD_DIR) / slug / save_as
         st, err = await _download(s, "/v1/pages/attachments/download_by_url", dest, params=params)
         if st != 200:
             return _err(st, err or f"Download failed for {url_param}")
