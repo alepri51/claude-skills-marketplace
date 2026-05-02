@@ -435,7 +435,7 @@ def _cli_main():
 
     tool = argv[0] if argv else ""
 
-    # Detect argparse-style misuse — common orchestrator mistake
+    # Detect argparse-style misuse
     if unknown_flags or args_json.startswith("--"):
         print(
             f"Error: argparse-style flags не поддерживаются (кроме --connection). Параметры передаются JSON-строкой.\n"
@@ -448,8 +448,7 @@ def _cli_main():
             f"  python db.py {tool} '{{\"pattern\":\"%\"}}' --connection db-parsing-dev\n"
             f"  python db.py db_table_schema '{{\"table\":\"users\"}}' --connection db-bnmap-prod\n"
             f"\n"
-            f"Найдены непонятные флаги: {' '.join(unknown_flags) if unknown_flags else args_json}\n"
-            f"См. .claude/docs/orchestrator/skills-rules.md §«Нотация вызовов».",
+            f"Найдены непонятные флаги: {' '.join(unknown_flags) if unknown_flags else args_json}",
             file=sys.stderr,
         )
         sys.exit(1)

@@ -8,7 +8,7 @@ Yandex Tracker CLI + MCP server.
    пример:
      python tracker.py issue_get '{"issue_key":"DE-1569"}'
      python tracker.py issues_find '{"query":"Queue: DE AND Status: open","per_page":10}'
-     python tracker.py issue_add_comment '{"issue_key":"DE-1569","text":"GSD: задача взята в анализ"}'
+     python tracker.py issue_add_comment '{"issue_key":"DE-1569","text":"Текст комментария"}'
 
 2) MCP (legacy): запуск без аргументов — stdio_server для MCP-клиента.
 
@@ -960,20 +960,18 @@ def _cli_main():
     tool = argv[0]
     args_json = argv[1] if len(argv) > 1 else "{}"
 
-    # Detect argparse-style misuse (--key value) — most common orchestrator mistake
+    # Detect argparse-style misuse (--key value)
     if args_json.startswith("--") or any(a.startswith("--") for a in argv[1:]):
         print(
             f"Error: argparse-style flags не поддерживаются. Параметры передаются JSON-строкой.\n"
             f"\n"
             f"❌ НЕ ТАК:\n"
-            f"  python tracker.py {tool} --issue_key GSD-88\n"
+            f"  python tracker.py {tool} --issue_key DE-88\n"
             f"  python tracker.py {tool} --queue DE --summary 'X'\n"
             f"\n"
             f"✓ ПРАВИЛЬНО (JSON позиционным аргументом):\n"
-            f"  python tracker.py {tool} '{{\"issue_key\":\"GSD-88\"}}'\n"
-            f"  python tracker.py issue_create '{{\"queue\":\"DE\",\"summary\":\"X\"}}'\n"
-            f"\n"
-            f"См. .claude/docs/orchestrator/skills-rules.md §«Нотация вызовов».",
+            f"  python tracker.py {tool} '{{\"issue_key\":\"DE-88\"}}'\n"
+            f"  python tracker.py issue_create '{{\"queue\":\"DE\",\"summary\":\"X\"}}'",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -985,9 +983,7 @@ def _cli_main():
             f"Error: invalid JSON in args — {e}\n"
             f"\n"
             f"Параметры скрипту передаются ОДНОЙ JSON-строкой вторым аргументом:\n"
-            f"  python tracker.py {tool} '{{\"issue_key\":\"GSD-88\"}}'\n"
-            f"\n"
-            f"См. .claude/docs/orchestrator/skills-rules.md §«Нотация вызовов».",
+            f"  python tracker.py {tool} '{{\"issue_key\":\"DE-88\"}}'",
             file=sys.stderr,
         )
         sys.exit(1)

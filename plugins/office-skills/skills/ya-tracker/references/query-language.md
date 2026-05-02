@@ -41,9 +41,9 @@ Followers: me()                        # я в наблюдателях
 ## Теги и компоненты
 
 ```
-Tags: gsd
-Tags: gsd, phase-1                     # все из списка (AND внутри тегов — через AND)
-Tags: gsd AND Tags: phase-1
+Tags: my-tag
+Tags: tag-a, tag-b                     # любой из списка
+Tags: tag-a AND Tags: tag-b            # оба
 Components: backend
 ```
 
@@ -52,23 +52,23 @@ Components: backend
 В самом запросе сортировки нет — используй параметры `issues_find`:
 `page`, `per_page` (по умолчанию 50, макс 100).
 
-## Типовые GSD-запросы
+## Типовые запросы
 
 ```
 # Открытые задачи в очереди
 Queue: PROJ AND Status: open
 
-# Задачи аналитика в работе
+# Активные задачи текущего пользователя
 Queue: PROJ AND Assignee: me() AND Resolution: empty()
 
 # Подзадачи родителя
 Parent: DE-1569
 
-# QA-задачи, ожидающие разблокировки
+# Задачи с тегом, в указанном статусе
 Queue: DE AND Tags: testing AND Status: ожидает
 
-# Задачи за последний спринт по сервису
-Sprint: current() AND Tags: bnmap-api-v2
+# Задачи текущего спринта по тегу
+Sprint: current() AND Tags: my-tag
 ```
 
 ## Документация

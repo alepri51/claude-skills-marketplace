@@ -851,7 +851,7 @@ def _cli_main():
     tool = argv[0]
     args_json = argv[1] if len(argv) > 1 else "{}"
 
-    # Detect argparse-style misuse — most common orchestrator mistake
+    # Detect argparse-style misuse
     if args_json.startswith("--") or any(a.startswith("--") for a in argv[1:]):
         print(
             f"Error: argparse-style flags не поддерживаются. Параметры передаются JSON-строкой.\n"
@@ -862,9 +862,7 @@ def _cli_main():
             f"\n"
             f"✓ ПРАВИЛЬНО (JSON позиционным аргументом):\n"
             f"  python wiki.py {tool} '{{\"slug\":\"team/handbook\",\"fields\":\"content\"}}'\n"
-            f"  python wiki.py page_update '{{\"page_id\":123,\"content\":\"X\"}}'\n"
-            f"\n"
-            f"См. .claude/docs/orchestrator/skills-rules.md §«Нотация вызовов».",
+            f"  python wiki.py page_update '{{\"page_id\":123,\"content\":\"X\"}}'",
             file=sys.stderr,
         )
         sys.exit(1)

@@ -168,7 +168,7 @@ python .claude/skills/ya-wiki/scripts/wiki.py page_get_subpages_by_slug '{"slug"
 - **Нет `YANDEX_TOKEN`** → скрипт выйдет с кодом 2 и сообщением
   «Fill it in .env». Исправь `.env` и запусти снова.
 - **Ошибка API** (401/403/404/500) — скрипт печатает `Error <status>:
-  <текст>`. Передать оркестратору as-is (не гадать причину).
+  <текст>`. Вернуть as-is (не гадать причину).
 - **Нет `aiohttp` или `mcp`** → `ImportError`. Установи:
   `python -m pip install aiohttp mcp`.
 

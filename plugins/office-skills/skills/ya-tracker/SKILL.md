@@ -10,7 +10,7 @@ description: >
   в очереди BACK», «собери контекст задачи», «создай подзадачу в DE»,
   «прикрепи PLAN.md к DE-1600», «скачай вложение из задачи», «оставь
   комментарий в родителе», «закрой подзадачу с резолюцией fixed»,
-  «найди задачи аналитика за неделю». Все 40+ операций Tracker API v2
+  «найди задачи пользователя за неделю». Все 40+ операций Tracker API v2
   доступны через один CLI. Токен из корневого .env.
 compatibility: >
   Требуется Python 3.10+ и пакеты: aiohttp, mcp. Установка:
@@ -66,11 +66,11 @@ python .claude/skills/ya-tracker/scripts/tracker.py \
 
 # добавить комментарий
 python .claude/skills/ya-tracker/scripts/tracker.py \
-  issue_add_comment '{"issue_key":"DE-1569","text":"GSD: задача взята в анализ"}'
+  issue_add_comment '{"issue_key":"DE-1569","text":"Текст комментария"}'
 
 # создать подзадачу
 python .claude/skills/ya-tracker/scripts/tracker.py \
-  issue_create '{"queue":"DE","summary":"DE-1569/Ф1: Индексы","parent":"DE-1569","tags":["gsd","phase-1","bnmap-api-v2"]}'
+  issue_create '{"queue":"DE","summary":"Краткое название","parent":"DE-1569","tags":["tag1","tag2"]}'
 
 # закрыть задачу
 python .claude/skills/ya-tracker/scripts/tracker.py \
@@ -143,7 +143,7 @@ python .claude/skills/ya-tracker/scripts/tracker.py queues_get_all '{"per_page":
 - **Нет `TRACKER_TOKEN`** → скрипт выйдет с кодом 2 и сообщением
   «Fill it in .env». Исправь `.env` и запусти снова.
 - **Ошибка API** (401/403/404/500) — скрипт печатает `Error <status>:
-  <текст>`. Передать аналитику as-is (не гадать причину).
+  <текст>`. Вернуть as-is (не гадать причину).
 - **Нет `aiohttp` или `mcp`** → `ImportError`. Установи:
   `python -m pip install aiohttp mcp`.
 

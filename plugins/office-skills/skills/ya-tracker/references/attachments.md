@@ -69,13 +69,13 @@ python scripts/tracker.py issue_download_all_attachments '{
 
 ## Загрузка файла
 
-**Абсолютный путь** обязательно (см. CLAUDE.md §9):
+`file_path` — абсолютный путь.
 
 ```
 python scripts/tracker.py issue_upload_attachment '{
   "issue_key": "DE-1569",
-  "file_path": "C:/projects/AI_AGENTS/o-a-v1/.planning/phases/1/PLAN.md",
-  "filename": "1-1-PLAN.md"
+  "file_path": "/abs/path/to/file.md",
+  "filename": "file.md"
 }'
 ```
 
@@ -83,25 +83,15 @@ python scripts/tracker.py issue_upload_attachment '{
 - `filename` — необязательно, по умолчанию basename.
 - Успех: вернёт метаданные загруженного вложения.
 
-## Важно: ветка задачи — до скачивания
-
-Скачанные вложения попадают в файловую систему (в `<DOWNLOAD_DIR>`).
-Если они попадут в `main` — засорят шаблонную ветку.
-
-**Правило:** создать ветку задачи `git checkout -b tasks/{issue_key}`
-**до** первого `issue_download_attachment`. См. CLAUDE.md §6.1.
-
 ## Типичные MIME-типы
 
-- `application/pdf` — читать через `Read file_path`, PDF поддерживается
-- `text/markdown`, `text/plain` — `Read file_path`
-- `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
-  — .docx, конвертировать при необходимости
-- `image/png`, `image/jpeg` — `Read file_path` (мультимодально)
-- `application/zip` — распаковывать перед чтением
+- `application/pdf`
+- `text/markdown`, `text/plain`
+- `application/vnd.openxmlformats-officedocument.wordprocessingml.document` — .docx
+- `image/png`, `image/jpeg`
+- `application/zip`
 
-## Если вложение большое
+## Размер вложения
 
-В `issue_get_attachments` есть поле `size` (в байтах). Если файл
-огромный (десятки MB) — спросить у аналитика, нужно ли его читать
-целиком, или можно работать со ссылкой/выжимкой.
+В `issue_get_attachments` есть поле `size` (в байтах) — для оценки
+до скачивания.
