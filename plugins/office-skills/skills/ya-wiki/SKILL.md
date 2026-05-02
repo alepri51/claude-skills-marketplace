@@ -78,9 +78,13 @@ python .claude/skills/ya-wiki/scripts/wiki.py \
 python .claude/skills/ya-wiki/scripts/wiki.py \
   page_upload_attachment '{"page_id":12345,"file_path":"C:/tmp/REPORT.md"}'
 
-# скачать файл по slug+name
+# скачать файл по slug+name (default: $WIKI_DOWNLOAD_DIR/<slug>/<filename>)
 python .claude/skills/ya-wiki/scripts/wiki.py \
   attachment_download_by_slug '{"slug":"users/foo/bar","filename":"x.pdf"}'
+
+# скачать в произвольную директорию (caller-specific layouts — project-planning artifacts и т.п.)
+python .claude/skills/ya-wiki/scripts/wiki.py \
+  attachment_download_by_slug '{"slug":"users/foo/bar","filename":"x.pdf","save_dir":"my/custom/path"}'
 
 # удалить страницу (запомни recovery_token!)
 python .claude/skills/ya-wiki/scripts/wiki.py \
