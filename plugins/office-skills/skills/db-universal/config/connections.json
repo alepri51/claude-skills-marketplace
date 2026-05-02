@@ -1,0 +1,19 @@
+{
+  "_comment": "Именованные подключения к БД. Значения вида ${VAR} резолвятся из корневого .env. Для добавления нового подключения: скопировать блок и заменить имя переменных.",
+  "db-parsing-dev": {
+    "host":     "${DB_PARSING_DEV_HOST}",
+    "port":     "${DB_PARSING_DEV_PORT}",
+    "user":     "${DB_PARSING_DEV_USER}",
+    "password": "${DB_PARSING_DEV_PASSWORD}",
+    "database": "${DB_PARSING_DEV_NAME}",
+    "db_type":  "${DB_PARSING_DEV_TYPE}"
+  },
+  "db-bnmap-prod": {
+    "host":     "${DB_BNMAP_PROD_HOST}",
+    "port":     "${DB_BNMAP_PROD_PORT}",
+    "user":     "${DB_BNMAP_PROD_USER}",
+    "password": "${DB_BNMAP_PROD_PASSWORD}",
+    "database": "${DB_BNMAP_PROD_NAME}",
+    "db_type":  "${DB_BNMAP_PROD_TYPE}"
+  }
+}

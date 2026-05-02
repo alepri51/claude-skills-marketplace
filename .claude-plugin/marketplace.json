@@ -1,0 +1,14 @@
+{
+  "name": "claude-skills-marketplace",
+  "owner": {
+    "name": "alepri51"
+  },
+  "plugins": [
+    {
+      "name": "office-skills",
+      "source": "./plugins/office-skills",
+      "description": "DB inspector (MySQL/Postgres/ClickHouse/Redis/MongoDB) + Yandex Tracker + Yandex Wiki",
+      "version": "0.1.0"
+    }
+  ]
+}
