@@ -83,6 +83,14 @@ python .claude/skills/ya-tracker/scripts/tracker.py \
 # метаданные очереди (queue_id, не queue!)
 python .claude/skills/ya-tracker/scripts/tracker.py \
   queue_get_metadata '{"queue_id":"DE"}'
+
+# удалить вложение из задачи
+python .claude/skills/ya-tracker/scripts/tracker.py \
+  issue_delete_attachment '{"issue_key":"DE-1569","attachment_id":12345}'
+
+# удалить очередь (РАЗРУШИТЕЛЬНО — обязателен confirm:true)
+python .claude/skills/ya-tracker/scripts/tracker.py \
+  queue_delete '{"queue_id":"SANDBOX","confirm":true}'
 ```
 
 ## Полный набор инструментов
@@ -97,7 +105,8 @@ python .claude/skills/ya-tracker/scripts/tracker.py \
 - `issue_create`, `issue_update`
 - `issue_execute_transition`, `issue_close`
 - `issue_add_comment`, `issue_update_comment`, `issue_delete_comment`
-- `issue_upload_attachment`
+- `issue_upload_attachment`, `issue_delete_attachment`
+- `issue_delete_checklist_item`, `issue_delete_checklist`
 - `issue_get_url`
 
 **Worklogs:** `issue_add_worklog`, `issue_update_worklog`, `issue_delete_worklog`
@@ -105,7 +114,17 @@ python .claude/skills/ya-tracker/scripts/tracker.py \
 **Links:** `issue_create_link`, `issue_delete_link`
 
 **Queues:** `queues_get_all`, `queue_get_metadata`, `queue_get_fields`,
-`queue_get_tags`, `queue_get_versions`
+`queue_get_tags`, `queue_get_versions`, `queue_delete_macro` ⚠, `queue_delete` ⚠
+
+**Projects:** `project_delete` ⚠
+
+**Boards:** `board_delete` ⚠, `board_delete_column` ⚠
+
+⚠ — разрушительные операции. Требуют параметр `"confirm": true` в JSON
+аргументах, иначе вернётся `Error 400` без обращения к API. Tracker API
+не поддерживает удаление самой задачи (`issue`), глобальных и локальных
+полей, компонентов и версий — для них используй закрытие резолюцией
+(`issue_close`) или скрытие через UI.
 
 **Users:** `users_get_all`, `users_search`, `user_get`, `user_get_current`
 

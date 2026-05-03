@@ -83,6 +83,22 @@ python scripts/tracker.py issue_upload_attachment '{
 - `filename` — необязательно, по умолчанию basename.
 - Успех: вернёт метаданные загруженного вложения.
 
+## Удаление вложения
+
+```
+python scripts/tracker.py issue_delete_attachment '{
+  "issue_key": "DE-1569",
+  "attachment_id": 12345
+}'
+```
+
+- Успех (HTTP 204): `Attachment 12345 deleted from DE-1569`.
+- 404 — вложение уже отсутствует или нет прав.
+- Скачанные локальные копии не трогаются — удаление только на стороне
+  Трекера.
+
+Получить `attachment_id` — через `issue_get_attachments` (поле `id`).
+
 ## Типичные MIME-типы
 
 - `application/pdf`

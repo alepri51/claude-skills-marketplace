@@ -102,8 +102,19 @@ def _ok(data: Any) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2, default=str))]
 
 
-def _err(status: int, text: str) -> list[TextContent]:
+def _err(status: int, text: Any) -> list[TextContent]:
     return [TextContent(type="text", text=f"Error {status}: {text}")]
+
+
+def _require_confirm(args: dict, op: str) -> list[TextContent] | None:
+    """Guard for destructive ops. Returns _err response if confirm!=true, else None."""
+    if args.get("confirm") is not True:
+        return _err(
+            400,
+            f"Destructive op '{op}' requires confirm:true. "
+            f"Operation aborted. Re-run with \"confirm\": true in JSON args.",
+        )
+    return None
 
 
 # ── Compact formatters ───────────────────────────────────────────────
@@ -263,9 +274,26 @@ TOOLS: list[Tool] = [
             "file_path": {"type": "string"},
             "filename": {"type": "string"},
         }, "required": ["issue_key", "file_path"]}),
+    Tool(name="issue_delete_attachment",
+        description="Delete an attachment from a Tracker issue by attachment id.",
+        inputSchema={"type": "object", "properties": {
+            "issue_key": {"type": "string"},
+            "attachment_id": {"type": ["string", "integer"]},
+        }, "required": ["issue_key", "attachment_id"]}),
     Tool(name="issue_get_checklist",
         description="Get checklist items of a Tracker issue.",
         inputSchema={"type": "object", "properties": {"issue_key": {"type": "string"}}, "required": ["issue_key"]}),
+    Tool(name="issue_delete_checklist_item",
+        description="Delete a single checklist item from an issue. Returns updated issue.",
+        inputSchema={"type": "object", "properties": {
+            "issue_key": {"type": "string"},
+            "item_id": {"type": ["string", "integer"]},
+        }, "required": ["issue_key", "item_id"]}),
+    Tool(name="issue_delete_checklist",
+        description="Delete the WHOLE checklist of an issue. Returns updated issue.",
+        inputSchema={"type": "object", "properties": {
+            "issue_key": {"type": "string"},
+        }, "required": ["issue_key"]}),
     Tool(name="issue_get_worklogs",
         description="Get worklog entries (time tracking) for an issue.",
         inputSchema={"type": "object", "properties": {"issue_key": {"type": "string"}}, "required": ["issue_key"]}),
@@ -379,6 +407,43 @@ TOOLS: list[Tool] = [
     Tool(name="queue_get_versions",
         description="Get all versions for a queue.",
         inputSchema={"type": "object", "properties": {"queue_id": {"type": "string"}}, "required": ["queue_id"]}),
+    Tool(name="queue_delete_macro",
+        description="DESTRUCTIVE. Delete a macro from a queue. Requires confirm:true.",
+        inputSchema={"type": "object", "properties": {
+            "queue_id": {"type": "string"},
+            "macro_id": {"type": ["string", "integer"]},
+            "confirm": {"type": "boolean", "description": "Must be true to actually delete."},
+        }, "required": ["queue_id", "macro_id", "confirm"]}),
+    Tool(name="queue_delete",
+        description="DESTRUCTIVE. Delete an entire Tracker queue with all its issues. "
+                    "Requires confirm:true. Recovery only via API support.",
+        inputSchema={"type": "object", "properties": {
+            "queue_id": {"type": "string"},
+            "confirm": {"type": "boolean"},
+        }, "required": ["queue_id", "confirm"]}),
+
+    Tool(name="project_delete",
+        description="DESTRUCTIVE. Delete a Tracker project by id. Requires confirm:true.",
+        inputSchema={"type": "object", "properties": {
+            "project_id": {"type": ["string", "integer"]},
+            "confirm": {"type": "boolean"},
+        }, "required": ["project_id", "confirm"]}),
+
+    Tool(name="board_delete",
+        description="DESTRUCTIVE. Delete an Agile board by id. Requires confirm:true.",
+        inputSchema={"type": "object", "properties": {
+            "board_id": {"type": ["string", "integer"]},
+            "confirm": {"type": "boolean"},
+        }, "required": ["board_id", "confirm"]}),
+    Tool(name="board_delete_column",
+        description="DESTRUCTIVE. Delete a column from a board. Requires confirm:true and "
+                    "version (sent as If-Match header for optimistic locking).",
+        inputSchema={"type": "object", "properties": {
+            "board_id": {"type": ["string", "integer"]},
+            "column_id": {"type": ["string", "integer"]},
+            "version": {"type": ["string", "integer"], "description": "Board version for If-Match header."},
+            "confirm": {"type": "boolean"},
+        }, "required": ["board_id", "column_id", "version", "confirm"]}),
 
     Tool(name="users_get_all",
         description="List user accounts in the organization.",
@@ -453,8 +518,11 @@ async def _patch(session, path, body):
         return r.status, data
 
 
-async def _delete(session, path):
-    async with session.delete(f"{BASE}{path}", headers=_h()) as r:
+async def _delete(session, path, headers_extra: dict[str, str] | None = None):
+    headers = _h()
+    if headers_extra:
+        headers.update(headers_extra)
+    async with session.delete(f"{BASE}{path}", headers=headers) as r:
         return r.status, await r.text()
 
 
@@ -603,12 +671,44 @@ async def _dispatch(s, name, a):
             return _ok([_fmt_attachment(att) for att in data])
         return _ok(_fmt_attachment(data) if isinstance(data, dict) else data)
 
+    if name == "issue_delete_attachment":
+        st, text = await _delete(s, f"/v2/issues/{a['issue_key']}/attachments/{a['attachment_id']}")
+        if st in (200, 204):
+            return _ok(f"Attachment {a['attachment_id']} deleted from {a['issue_key']}")
+        return _err(st, text)
+
     if name == "issue_get_checklist":
         st, data = await _get(s, f"/v2/issues/{a['issue_key']}/checklist")
         if st != 200:
             return _err(st, data)
         items = data if isinstance(data, list) else data.get("items", data.get("checklistItems", []))
         return _ok([_fmt_checklist(c) for c in items])
+
+    if name == "issue_delete_checklist_item":
+        st, text = await _delete(
+            s, f"/v2/issues/{a['issue_key']}/checklistItems/{a['item_id']}"
+        )
+        if st in (200, 204):
+            try:
+                issue = json.loads(text)
+                if isinstance(issue, dict) and issue.get("key"):
+                    return _ok({"deleted_item": a["item_id"], "issue": _fmt_issue(issue)})
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return _ok(f"Checklist item {a['item_id']} deleted from {a['issue_key']}")
+        return _err(st, text)
+
+    if name == "issue_delete_checklist":
+        st, text = await _delete(s, f"/v2/issues/{a['issue_key']}/checklistItems")
+        if st in (200, 204):
+            try:
+                issue = json.loads(text)
+                if isinstance(issue, dict) and issue.get("key"):
+                    return _ok({"checklist_cleared": a["issue_key"], "issue": _fmt_issue(issue)})
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return _ok(f"Whole checklist deleted from {a['issue_key']}")
+        return _err(st, text)
 
     if name == "issue_get_worklogs":
         st, data = await _get(s, f"/v2/issues/{a['issue_key']}/worklogs")
@@ -805,6 +905,57 @@ async def _dispatch(s, name, a):
         if st != 200:
             return _err(st, data)
         return _ok(data)
+
+    if name == "queue_delete_macro":
+        guard = _require_confirm(a, "queue_delete_macro")
+        if guard is not None:
+            return guard
+        st, text = await _delete(s, f"/v2/queues/{a['queue_id']}/macros/{a['macro_id']}")
+        if st in (200, 204):
+            return _ok(f"Macro {a['macro_id']} deleted from queue {a['queue_id']}")
+        return _err(st, text)
+
+    if name == "queue_delete":
+        guard = _require_confirm(a, "queue_delete")
+        if guard is not None:
+            return guard
+        st, text = await _delete(s, f"/v2/queues/{a['queue_id']}")
+        if st in (200, 204):
+            return _ok(f"Queue {a['queue_id']} deleted")
+        return _err(st, text)
+
+    # ── Projects ─────────────────────────────────────────────
+    if name == "project_delete":
+        guard = _require_confirm(a, "project_delete")
+        if guard is not None:
+            return guard
+        st, text = await _delete(s, f"/v2/projects/{a['project_id']}")
+        if st in (200, 204):
+            return _ok(f"Project {a['project_id']} deleted")
+        return _err(st, text)
+
+    # ── Boards ───────────────────────────────────────────────
+    if name == "board_delete":
+        guard = _require_confirm(a, "board_delete")
+        if guard is not None:
+            return guard
+        st, text = await _delete(s, f"/v2/boards/{a['board_id']}")
+        if st in (200, 204):
+            return _ok(f"Board {a['board_id']} deleted")
+        return _err(st, text)
+
+    if name == "board_delete_column":
+        guard = _require_confirm(a, "board_delete_column")
+        if guard is not None:
+            return guard
+        st, text = await _delete(
+            s,
+            f"/v2/boards/{a['board_id']}/columns/{a['column_id']}",
+            headers_extra={"If-Match": str(a["version"])},
+        )
+        if st in (200, 204):
+            return _ok(f"Column {a['column_id']} deleted from board {a['board_id']}")
+        return _err(st, text)
 
     # ── Users ────────────────────────────────────────────────
     if name == "users_get_all":
