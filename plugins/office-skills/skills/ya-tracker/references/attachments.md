@@ -21,7 +21,7 @@ python scripts/tracker.py issue_download_attachment '{
 ```
 
 `filename` опционален — берётся из API metadata, если не передан.
-`save_dir` опционален — путь куда положить файл.
+`save_dir` опционален — путь куда положить файл. **`save_path` принимается как alias** к `save_dir` (обратная совместимость с интуитивным именованием).
 
 Полный вызов с переопределениями:
 
@@ -30,20 +30,26 @@ python scripts/tracker.py issue_download_attachment '{
   "issue_key": "DE-1569",
   "attachment_id": 12345,
   "filename": "TRD.pdf",
-  "save_dir": "downloads/DE-1569"
+  "save_dir": "downloads/DE-1569",
+  "overwrite": false
 }'
 ```
 
 **Куда сохраняется** (приоритет):
-1. `save_dir/<filename>` — если `save_dir` передан.
+1. `save_dir/<filename>` — если `save_dir` (или `save_path`) передан.
 2. `<DOWNLOAD_DIR>/<issue_key>/<filename>` — fallback.
 
 `DOWNLOAD_DIR` — из `.env` (`TRACKER_DOWNLOAD_DIR`), по умолчанию
 `./downloads` относительно CWD.
 
+**Поведение на коллизию имени файла** (default):
+- Если файл с таким именем уже есть — auto-suffix: `TRD.pdf` → `TRD_2.pdf` → `TRD_3.pdf` …
+- В ответе появляется флаг `"renamed": true`, а `name`/`downloaded` указывают на фактический путь.
+- Чтобы перезаписать существующий файл — передать `"overwrite": true`.
+
 Вернёт:
 ```json
-{"downloaded": "C:\\...\\downloads\\DE-1569\\TRD.pdf", "size": 524288, "name": "TRD.pdf"}
+{"downloaded": "C:\\...\\downloads\\DE-1569\\TRD.pdf", "size": 524288, "name": "TRD.pdf", "renamed": false}
 ```
 
 ## Скачивание ВСЕХ вложений одним вызовом
@@ -58,14 +64,16 @@ python scripts/tracker.py issue_download_all_attachments '{
 Параллельно скачивает все вложения. Возвращает:
 ```json
 {
-  "downloaded": [{"id": "123", "name": "INTAKE.md", "path": "...", "size": 24136}, ...],
+  "downloaded": [{"id": "123", "name": "INTAKE.md", "path": "...", "size": 24136, "renamed": false}, ...],
   "failed": [],
   "count": 9, "total": 9,
   "save_dir": "downloads/DE-1569"
 }
 ```
 
-`save_dir` опционален — fallback на `<DOWNLOAD_DIR>/<issue_key>/`.
+`save_dir` опционален — fallback на `<DOWNLOAD_DIR>/<issue_key>/`. `save_path` принимается как alias.
+
+`overwrite` (default `false`): на коллизию имени файла — auto-suffix `_2`, `_3`, …; с `true` — silent overwrite. Если в одной задаче встречаются несколько вложений с одинаковым `name` — все они скачаются (с авто-суффиксами), а не затрут друг друга.
 
 ## Загрузка файла
 

@@ -253,19 +253,27 @@ TOOLS: list[Tool] = [
     Tool(name="issue_download_attachment",
         description="Download an attachment from a Tracker issue to local disk. "
                     "filename is optional — if omitted, name is auto-resolved from API metadata. "
-                    "save_dir is optional — falls back to TRACKER_DOWNLOAD_DIR or ./downloads.",
+                    "save_dir is optional — falls back to TRACKER_DOWNLOAD_DIR or ./downloads. "
+                    "save_path accepted as alias for save_dir. "
+                    "On filename collision: auto-suffix _2, _3, … unless overwrite=true.",
         inputSchema={"type": "object", "properties": {
             "issue_key": {"type": "string"},
             "attachment_id": {"type": ["string", "integer"]},
             "filename": {"type": "string"},
             "save_dir": {"type": "string"},
+            "save_path": {"type": "string"},
+            "overwrite": {"type": "boolean"},
         }, "required": ["issue_key", "attachment_id"]}),
     Tool(name="issue_download_all_attachments",
         description="Download ALL attachments of an issue in one call (parallel). "
-                    "save_dir is optional — falls back to TRACKER_DOWNLOAD_DIR/<issue_key>/.",
+                    "save_dir is optional — falls back to TRACKER_DOWNLOAD_DIR/<issue_key>/. "
+                    "save_path accepted as alias for save_dir. "
+                    "On filename collision: auto-suffix _2, _3, … unless overwrite=true.",
         inputSchema={"type": "object", "properties": {
             "issue_key": {"type": "string"},
             "save_dir": {"type": "string"},
+            "save_path": {"type": "string"},
+            "overwrite": {"type": "boolean"},
         }, "required": ["issue_key"]}),
     Tool(name="issue_upload_attachment",
         description="Upload a file attachment to a Tracker issue. Provide absolute file path on disk.",
@@ -328,11 +336,14 @@ TOOLS: list[Tool] = [
             "comment": {"type": "string"}, "fields": {"type": "object"},
         }, "required": ["issue_key", "transition_id"]}),
     Tool(name="issue_add_comment",
-        description="Add a comment to a Tracker issue.",
+        description="Add a comment to a Tracker issue. "
+                    "Provide text inline OR text_file (UTF-8 path read and used as text). "
+                    "text_file avoids PowerShell cp1251 / JSON-escape boilerplate for multi-line content.",
         inputSchema={"type": "object", "properties": {
             "issue_key": {"type": "string"}, "text": {"type": "string"},
+            "text_file": {"type": "string"},
             "summonees": {"type": "array", "items": {"type": "string"}},
-        }, "required": ["issue_key", "text"]}),
+        }, "required": ["issue_key"]}),
     Tool(name="issue_update_comment",
         description="Update an existing comment.",
         inputSchema={"type": "object", "properties": {
@@ -526,20 +537,38 @@ async def _delete(session, path, headers_extra: dict[str, str] | None = None):
         return r.status, await r.text()
 
 
-async def _download(session, url, dest: Path):
+def _claim_dest(dest: Path, overwrite: bool):
+    """Open dest for binary write. If exists and not overwrite — try _2, _3, … (atomic via O_EXCL).
+    Returns (file_handle, actual_path)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if overwrite:
+        return open(dest, "wb"), dest
+    stem, suffix = dest.stem, dest.suffix
+    n = 1
+    while True:
+        candidate = dest if n == 1 else dest.with_name(f"{stem}_{n}{suffix}")
+        try:
+            return open(candidate, "xb"), candidate
+        except FileExistsError:
+            n += 1
+
+
+async def _download(session, url, dest: Path, overwrite: bool = False):
     headers = _h()
     del headers["Content-Type"]
     async with session.get(url, headers=headers) as r:
         if r.status != 200:
-            return r.status, f"HTTP {r.status} from {url}"
+            return r.status, f"HTTP {r.status} from {url}", None
         try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            with open(dest, "wb") as f:
+            fh, actual = _claim_dest(dest, overwrite)
+            try:
                 async for chunk in r.content.iter_chunked(8192):
-                    f.write(chunk)
+                    fh.write(chunk)
+            finally:
+                fh.close()
         except OSError as e:
-            return 0, f"Filesystem error writing {dest}: {e}"
-        return 200, None
+            return 0, f"Filesystem error writing {dest}: {e}", None
+        return 200, None, actual
 
 
 async def _upload_attachment(session, issue_key, file_path, filename=None):
@@ -630,18 +659,21 @@ async def _dispatch(s, name, a):
         filename = a.get("filename") or att.get("name")
         if not filename:
             return _err(400, f"Attachment {att_id} has no name in metadata; pass explicit filename")
-        save_dir = a.get("save_dir") or str(Path(DOWNLOAD_DIR) / issue_key)
+        save_dir = a.get("save_dir") or a.get("save_path") or str(Path(DOWNLOAD_DIR) / issue_key)
+        overwrite = bool(a.get("overwrite", False))
         dest = Path(save_dir) / filename
-        dl_status, dl_err = await _download(s, content_url, dest)
-        if dl_status != 200:
+        dl_status, dl_err, actual = await _download(s, content_url, dest, overwrite=overwrite)
+        if dl_status != 200 or actual is None:
             return _err(dl_status, dl_err or f"Failed to download from {content_url}")
-        if not dest.exists():
-            return _err(500, f"Download reported success but file missing: {dest}")
-        return _ok({"downloaded": str(dest), "size": dest.stat().st_size, "name": filename})
+        if not actual.exists():
+            return _err(500, f"Download reported success but file missing: {actual}")
+        return _ok({"downloaded": str(actual), "size": actual.stat().st_size, "name": actual.name,
+                    "renamed": actual.name != filename})
 
     if name == "issue_download_all_attachments":
         issue_key = a["issue_key"]
-        save_dir = a.get("save_dir") or str(Path(DOWNLOAD_DIR) / issue_key)
+        save_dir = a.get("save_dir") or a.get("save_path") or str(Path(DOWNLOAD_DIR) / issue_key)
+        overwrite = bool(a.get("overwrite", False))
         st, data = await _get(s, f"/v2/issues/{issue_key}/attachments")
         if st != 200:
             return _err(st, data)
@@ -653,10 +685,11 @@ async def _dispatch(s, name, a):
             if not name_ or not url:
                 return {"id": att.get("id"), "error": "missing name or content url"}
             dest = Path(save_dir) / name_
-            status, err = await _download(s, url, dest)
-            if status != 200 or not dest.exists():
+            status, err, actual = await _download(s, url, dest, overwrite=overwrite)
+            if status != 200 or actual is None or not actual.exists():
                 return {"id": att.get("id"), "name": name_, "error": err or f"status {status}"}
-            return {"id": att.get("id"), "name": name_, "path": str(dest), "size": dest.stat().st_size}
+            return {"id": att.get("id"), "name": name_, "path": str(actual),
+                    "size": actual.stat().st_size, "renamed": actual.name != name_}
         results = await asyncio.gather(*[_dl_one(att) for att in data])
         successful = [r for r in results if "error" not in r]
         failed = [r for r in results if "error" in r]
@@ -764,7 +797,15 @@ async def _dispatch(s, name, a):
         return _ok({"executed": tid, "result": data})
 
     if name == "issue_add_comment":
-        body: dict = {"text": a["text"]}
+        text = a.get("text")
+        if not text and a.get("text_file"):
+            try:
+                text = Path(a["text_file"]).read_text(encoding="utf-8")
+            except OSError as e:
+                return _err(400, f"text_file read error: {e}")
+        if not text:
+            return _err(400, "either text or text_file is required")
+        body: dict = {"text": text}
         if a.get("summonees"):
             body["summonees"] = a["summonees"]
         st, data = await _post(s, f"/v2/issues/{a['issue_key']}/comments", body)

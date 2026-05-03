@@ -64,9 +64,13 @@ python .claude/skills/ya-tracker/scripts/tracker.py \
 python .claude/skills/ya-tracker/scripts/tracker.py \
   issues_find '{"query":"Queue: BACK AND Status: open","per_page":20}'
 
-# добавить комментарий
+# добавить комментарий (одна строка)
 python .claude/skills/ya-tracker/scripts/tracker.py \
   issue_add_comment '{"issue_key":"DE-1569","text":"Текст комментария"}'
+
+# добавить multi-line комментарий из файла (UTF-8) — без PowerShell cp1251 / JSON-escape boilerplate
+python .claude/skills/ya-tracker/scripts/tracker.py \
+  issue_add_comment '{"issue_key":"DE-1569","text_file":".planning/tracker/DE-1569/comment.md"}'
 
 # создать подзадачу
 python .claude/skills/ya-tracker/scripts/tracker.py \
@@ -77,8 +81,14 @@ python .claude/skills/ya-tracker/scripts/tracker.py \
   issue_close '{"issue_key":"DE-1569","resolution_id":"fixed","comment":"Готово"}'
 
 # скачать все вложения задачи параллельно (filename auto-resolves)
+# save_dir — канонический ключ; save_path принимается как alias.
+# Коллизия имён: auto-suffix _2, _3 … (для force указать "overwrite": true).
 python .claude/skills/ya-tracker/scripts/tracker.py \
   issue_download_all_attachments '{"issue_key":"DE-1569","save_dir":"downloads/DE-1569"}'
+
+# скачать одно вложение в конкретный путь (overwrite файла, если он уже есть)
+python .claude/skills/ya-tracker/scripts/tracker.py \
+  issue_download_attachment '{"issue_key":"DE-1569","attachment_id":12345,"save_dir":".tmp/refresh","overwrite":true}'
 
 # метаданные очереди (queue_id, не queue!)
 python .claude/skills/ya-tracker/scripts/tracker.py \
