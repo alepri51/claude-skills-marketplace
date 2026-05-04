@@ -94,6 +94,18 @@ python .claude/skills/ya-tracker/scripts/tracker.py \
 python .claude/skills/ya-tracker/scripts/tracker.py \
   queue_get_metadata '{"queue_id":"DE"}'
 
+# получить workflow по id (например, W163)
+python .claude/skills/ya-tracker/scripts/tracker.py \
+  workflow_get '{"workflow_id":"W163"}'
+
+# список всех workflows
+python .claude/skills/ya-tracker/scripts/tracker.py \
+  workflows_get_all '{"per_page":50}'
+
+# обновить workflow (точную схему body см. в references/workflows.md)
+python .claude/skills/ya-tracker/scripts/tracker.py \
+  workflow_update '{"workflow_id":"W163","body":{"name":"Новое имя"}}'
+
 # удалить вложение из задачи
 python .claude/skills/ya-tracker/scripts/tracker.py \
   issue_delete_attachment '{"issue_key":"DE-1569","attachment_id":12345}'
@@ -130,6 +142,12 @@ python .claude/skills/ya-tracker/scripts/tracker.py \
 
 **Boards:** `board_delete` ⚠, `board_delete_column` ⚠
 
+**Workflows:** `workflows_get_all`, `workflow_get`, `workflow_create`,
+`workflow_update`, `workflow_delete` ⚠, `workflow_get_steps`,
+`workflow_get_transitions`. Точная схема тела для create/update — см.
+`references/workflows.md` (получи существующий workflow и используй его
+shape).
+
 ⚠ — разрушительные операции. Требуют параметр `"confirm": true` в JSON
 аргументах, иначе вернётся `Error 400` без обращения к API. Tracker API
 не поддерживает удаление самой задачи (`issue`), глобальных и локальных
@@ -150,6 +168,7 @@ python .claude/skills/ya-tracker/scripts/tracker.py \
 - **Транзиции и закрытие** — `references/transitions-and-close.md`
 - **Скачивание/загрузка вложений** — `references/attachments.md`
 - **Синтаксис query language** — `references/query-language.md`
+- **Workflows (управление бизнес-процессами)** — `references/workflows.md`
 
 ## Проверка окружения (doctor)
 

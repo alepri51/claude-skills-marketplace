@@ -218,6 +218,18 @@ def _fmt_worklog(d: dict) -> dict:
     }
 
 
+def _fmt_workflow(d: dict) -> dict:
+    return {
+        "id": d.get("id"),
+        "key": d.get("key"),
+        "name": d.get("name") or d.get("display"),
+        "queue": _ref(d.get("queue")),
+        "issue_type": _ref(d.get("issueType")),
+        "steps_count": len(d.get("steps") or []),
+        "transitions_count": len(d.get("transitions") or []),
+    }
+
+
 # ── Tool definitions ─────────────────────────────────────────────────
 
 TOOLS: list[Tool] = [
@@ -493,6 +505,48 @@ TOOLS: list[Tool] = [
     Tool(name="get_myself",
         description="Get the current authenticated user info.",
         inputSchema={"type": "object", "properties": {}}),
+
+    Tool(name="workflows_get_all",
+        description="List all workflows. Compact summary per item.",
+        inputSchema={"type": "object", "properties": {
+            "page": {"type": "integer", "default": 1},
+            "per_page": {"type": "integer", "default": 50},
+        }}),
+    Tool(name="workflow_get",
+        description="Get a workflow by id (e.g. W163). Returns raw JSON with steps/transitions/statuses.",
+        inputSchema={"type": "object", "properties": {
+            "workflow_id": {"type": "string", "description": "Workflow id, e.g. 'W163'"},
+        }, "required": ["workflow_id"]}),
+    Tool(name="workflow_create",
+        description="Create a workflow. Pass full JSON via 'body' — exact schema is not in public docs; "
+                    "fetch an existing workflow with workflow_get to learn the shape.",
+        inputSchema={"type": "object", "properties": {
+            "body": {"type": "object", "description": "Raw workflow JSON body"},
+        }, "required": ["body"]}),
+    Tool(name="workflow_update",
+        description="Partial update of a workflow via PATCH. Pass changed fields in 'body'.",
+        inputSchema={"type": "object", "properties": {
+            "workflow_id": {"type": "string"},
+            "body": {"type": "object"},
+        }, "required": ["workflow_id", "body"]}),
+    Tool(name="workflow_delete",
+        description="DESTRUCTIVE. Delete a workflow. Requires confirm:true.",
+        inputSchema={"type": "object", "properties": {
+            "workflow_id": {"type": "string"},
+            "confirm": {"type": "boolean"},
+        }, "required": ["workflow_id", "confirm"]}),
+    Tool(name="workflow_get_steps",
+        description="Experimental. Get workflow steps via /steps subresource. "
+                    "If 404 — read 'steps' field from workflow_get response instead.",
+        inputSchema={"type": "object", "properties": {
+            "workflow_id": {"type": "string"},
+        }, "required": ["workflow_id"]}),
+    Tool(name="workflow_get_transitions",
+        description="Experimental. Get workflow transitions via /transitions subresource. "
+                    "If 404 — read 'transitions' field from workflow_get response instead.",
+        inputSchema={"type": "object", "properties": {
+            "workflow_id": {"type": "string"},
+        }, "required": ["workflow_id"]}),
 ]
 
 
@@ -1094,6 +1148,55 @@ async def _dispatch(s, name, a):
             return _err(st, data)
         return _ok({"uid": data.get("uid"), "login": data.get("login"),
                     "display": data.get("display"), "email": data.get("email")})
+
+    # ── Workflows ────────────────────────────────────────────
+    if name == "workflows_get_all":
+        page = a.get("page", 1); per_page = a.get("per_page", 50)
+        st, data = await _get(s, "/v2/workflows", {"page": page, "perPage": per_page})
+        if st != 200:
+            return _err(st, data)
+        if isinstance(data, list):
+            return _ok([_fmt_workflow(w) for w in data])
+        return _ok(data)
+
+    if name == "workflow_get":
+        st, data = await _get(s, f"/v2/workflows/{a['workflow_id']}")
+        if st != 200:
+            return _err(st, data)
+        return _ok(data)
+
+    if name == "workflow_create":
+        st, data = await _post(s, "/v2/workflows", a["body"])
+        if st not in (200, 201):
+            return _err(st, data)
+        return _ok(data)
+
+    if name == "workflow_update":
+        st, data = await _patch(s, f"/v2/workflows/{a['workflow_id']}", a["body"])
+        if st != 200:
+            return _err(st, data)
+        return _ok(data)
+
+    if name == "workflow_delete":
+        guard = _require_confirm(a, "workflow_delete")
+        if guard is not None:
+            return guard
+        st, text = await _delete(s, f"/v2/workflows/{a['workflow_id']}")
+        if st in (200, 204):
+            return _ok(f"Workflow {a['workflow_id']} deleted")
+        return _err(st, text)
+
+    if name == "workflow_get_steps":
+        st, data = await _get(s, f"/v2/workflows/{a['workflow_id']}/steps")
+        if st != 200:
+            return _err(st, data)
+        return _ok(data)
+
+    if name == "workflow_get_transitions":
+        st, data = await _get(s, f"/v2/workflows/{a['workflow_id']}/transitions")
+        if st != 200:
+            return _err(st, data)
+        return _ok(data)
 
     return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
