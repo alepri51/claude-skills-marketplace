@@ -14,12 +14,12 @@
 Пример из `.env`:
 
 ```
-DB_PARSING_DEV_HOST=10.0.0.42
-DB_PARSING_DEV_PORT=3306
-DB_PARSING_DEV_USER=inspector
-DB_PARSING_DEV_PASSWORD=secret
-DB_PARSING_DEV_NAME=parsing
-DB_PARSING_DEV_TYPE=mysql
+DB_PARSING_DEV_HOST=<host>
+DB_PARSING_DEV_PORT=<port>
+DB_PARSING_DEV_USER=<user>
+DB_PARSING_DEV_PASSWORD=<password>
+DB_PARSING_DEV_NAME=<database>
+DB_PARSING_DEV_TYPE=<mysql|postgres|clickhouse|mongo|redis>
 ```
 
 Вызов:
