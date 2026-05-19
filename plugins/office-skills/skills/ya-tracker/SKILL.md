@@ -76,6 +76,10 @@ python .claude/skills/ya-tracker/scripts/tracker.py \
 python .claude/skills/ya-tracker/scripts/tracker.py \
   issue_create '{"queue":"DE","summary":"Краткое название","parent":"DE-1569","tags":["tag1","tag2"]}'
 
+# создать задачу с summary/description из файла (PS cp1251 safe) + custom fields pass-through
+python .claude/skills/ya-tracker/scripts/tracker.py \
+  issue_create '{"queue":"DE","summary_file":".planning/title.txt","description_file":".planning/body.md","fields":{"672e0780dcfbf65b9fd56e25--service":"backend","subEpic":"DE-100"}}'
+
 # закрыть задачу
 python .claude/skills/ya-tracker/scripts/tracker.py \
   issue_close '{"issue_key":"DE-1569","resolution_id":"fixed","comment":"Готово"}'

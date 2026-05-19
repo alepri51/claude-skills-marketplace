@@ -76,12 +76,16 @@ TRACKER_CLOUD_ORG_ID = _resolve_var_ref(os.environ.get("YANDEX_CLOUD_ORG_ID", ""
 BASE = _resolve_var_ref(os.environ.get("TRACKER_BASE_URL", "https://api.tracker.yandex.net"))
 DOWNLOAD_DIR = _resolve_var_ref(os.environ.get("TRACKER_DOWNLOAD_DIR", os.path.join(os.getcwd(), "downloads")))
 
-# Startup diagnostics (stderr only)
-sys.stderr.write(f"[ya-tracker] TOKEN={'yes' if TRACKER_TOKEN else 'MISSING'} "
-                 f"ORG_ID={TRACKER_ORG_ID or 'MISSING'} "
-                 f"CLOUD_ORG_ID={TRACKER_CLOUD_ORG_ID or 'none'} "
-                 f"CWD={os.getcwd()}\n")
-sys.stderr.flush()
+# Startup diagnostics (stderr only). По умолчанию молчим — мешает чистому stdout/stderr
+# парсингу caller'ом. Включить: YA_TRACKER_VERBOSE=1. Всегда печатаем при missing TOKEN.
+_QUIET = os.environ.get("YA_TRACKER_QUIET", "").lower() in ("1", "true", "yes")
+_VERBOSE = os.environ.get("YA_TRACKER_VERBOSE", "").lower() in ("1", "true", "yes")
+if not TRACKER_TOKEN or (_VERBOSE and not _QUIET):
+    sys.stderr.write(f"[ya-tracker] TOKEN={'yes' if TRACKER_TOKEN else 'MISSING'} "
+                     f"ORG_ID={TRACKER_ORG_ID or 'MISSING'} "
+                     f"CLOUD_ORG_ID={TRACKER_CLOUD_ORG_ID or 'none'} "
+                     f"CWD={os.getcwd()}\n")
+    sys.stderr.flush()
 
 server = Server("ya-tracker")
 
@@ -102,8 +106,26 @@ def _ok(data: Any) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2, default=str))]
 
 
+_ERROR_PREFIX = "Error "  # sentinel for _cli_main exit code
+
+
 def _err(status: int, text: Any) -> list[TextContent]:
-    return [TextContent(type="text", text=f"Error {status}: {text}")]
+    return [TextContent(type="text", text=f"{_ERROR_PREFIX}{status}: {text}")]
+
+
+def _resolve_text(args: dict, inline_key: str, file_key: str) -> tuple[str | None, str | None]:
+    """Return (text, error). Prefers inline; falls back to file (UTF-8 read).
+    Both None → (None, None). File read error → (None, err_msg)."""
+    val = args.get(inline_key)
+    if val:
+        return val, None
+    fpath = args.get(file_key)
+    if not fpath:
+        return None, None
+    try:
+        return Path(fpath).read_text(encoding="utf-8"), None
+    except OSError as e:
+        return None, f"{file_key} read error: {e}"
 
 
 def _require_confirm(args: dict, op: str) -> list[TextContent] | None:
@@ -319,27 +341,38 @@ TOOLS: list[Tool] = [
         inputSchema={"type": "object", "properties": {"issue_key": {"type": "string"}}, "required": ["issue_key"]}),
 
     Tool(name="issue_create",
-        description="Create a new Tracker issue.",
+        description="Create a new Tracker issue. "
+                    "summary/description можно передать inline ИЛИ через summary_file/description_file "
+                    "(UTF-8 path read). Файлы избавляют от PowerShell cp1251 mojibake и JSON-эскейпов. "
+                    "Custom fields: используй 'fields' (dict) — merge в body после whitelist, "
+                    "ключи вида '672e0780dcfbf65b9fd56e25--service' проходят как есть.",
         inputSchema={"type": "object", "properties": {
             "queue": {"type": "string"}, "summary": {"type": "string"},
+            "summary_file": {"type": "string"},
             "type": {"type": "integer"}, "description": {"type": "string"},
+            "description_file": {"type": "string"},
             "assignee": {"type": "string"}, "priority": {"type": "string"},
             "parent": {"type": "string"},
             "sprint": {"type": "array", "items": {"type": "string"}},
             "tags": {"type": "array", "items": {"type": "string"}},
-            "fields": {"type": "object"},
-        }, "required": ["queue", "summary"]}),
+            "fields": {"type": "object", "description": "Custom fields pass-through (merged after whitelist)."},
+        }, "required": ["queue"]}),
     Tool(name="issue_update",
-        description="Update an existing Tracker issue. Only provided fields are changed.",
+        description="Update an existing Tracker issue. Only provided fields are changed. "
+                    "summary/description можно передать inline ИЛИ через summary_file/description_file "
+                    "(UTF-8 path read).",
         inputSchema={"type": "object", "properties": {
             "issue_key": {"type": "string"}, "summary": {"type": "string"},
-            "description": {"type": "string"}, "assignee": {"type": "string"},
+            "summary_file": {"type": "string"},
+            "description": {"type": "string"},
+            "description_file": {"type": "string"},
+            "assignee": {"type": "string"},
             "priority": {"type": "string"}, "type": {"type": "integer"},
             "parent": {"type": "string"},
             "tags": {"type": "array", "items": {"type": "string"}},
             "sprint": {"type": "array", "items": {"type": "string"}},
             "followers": {"type": "object"},
-            "fields": {"type": "object"},
+            "fields": {"type": "object", "description": "Custom fields pass-through (merged after whitelist)."},
         }, "required": ["issue_key"]}),
     Tool(name="issue_execute_transition",
         description="Execute a status transition on an issue.",
@@ -357,11 +390,12 @@ TOOLS: list[Tool] = [
             "summonees": {"type": "array", "items": {"type": "string"}},
         }, "required": ["issue_key"]}),
     Tool(name="issue_update_comment",
-        description="Update an existing comment.",
+        description="Update an existing comment. Inline text OR text_file (UTF-8 path read).",
         inputSchema={"type": "object", "properties": {
             "issue_key": {"type": "string"}, "comment_id": {"type": "integer"},
             "text": {"type": "string"},
-        }, "required": ["issue_key", "comment_id", "text"]}),
+            "text_file": {"type": "string"},
+        }, "required": ["issue_key", "comment_id"]}),
     Tool(name="issue_delete_comment",
         description="Delete a comment.",
         inputSchema={"type": "object", "properties": {
@@ -379,16 +413,19 @@ TOOLS: list[Tool] = [
         inputSchema={"type": "object", "properties": {"issue_key": {"type": "string"}}, "required": ["issue_key"]}),
 
     Tool(name="issue_add_worklog",
-        description="Add a worklog entry (log spent time).",
+        description="Add a worklog entry (log spent time). comment inline OR comment_file (UTF-8).",
         inputSchema={"type": "object", "properties": {
             "issue_key": {"type": "string"}, "duration": {"type": "string", "description": "ISO-8601, e.g. 'PT1H30M'"},
-            "comment": {"type": "string"}, "start": {"type": "string"},
+            "comment": {"type": "string"},
+            "comment_file": {"type": "string"},
+            "start": {"type": "string"},
         }, "required": ["issue_key", "duration"]}),
     Tool(name="issue_update_worklog",
-        description="Update an existing worklog entry.",
+        description="Update an existing worklog entry. comment inline OR comment_file (UTF-8).",
         inputSchema={"type": "object", "properties": {
             "issue_key": {"type": "string"}, "worklog_id": {"type": "integer"},
             "duration": {"type": "string"}, "comment": {"type": "string"},
+            "comment_file": {"type": "string"},
             "start": {"type": "string"},
         }, "required": ["issue_key", "worklog_id"]}),
     Tool(name="issue_delete_worklog",
@@ -625,23 +662,47 @@ async def _download(session, url, dest: Path, overwrite: bool = False):
         return 200, None, actual
 
 
+def _ascii_fallback(name: str) -> str:
+    """ASCII-safe fallback filename for Content-Disposition filename= field.
+    Replaces non-ASCII bytes with '_'. Preserves extension if last char block ASCII."""
+    safe = "".join(c if 32 <= ord(c) < 127 and c not in '"\\' else "_" for c in name)
+    return safe or "attachment.bin"
+
+
 async def _upload_attachment(session, issue_key, file_path, filename=None):
+    """Upload attachment via manual multipart so we control Content-Disposition.
+    aiohttp.FormData percent-encodes filename — Tracker then saves "%D0%9F..." as literal name.
+    RFC 5987 fix: send ASCII fallback in filename= AND UTF-8 percent-encoded in filename*."""
+    import uuid
+    from urllib.parse import quote
     path = Path(file_path)
     if not path.exists():
         return 404, f"File not found: {file_path}"
     fname = filename or path.name
+    ascii_name = _ascii_fallback(fname)
+    encoded_name = quote(fname, safe="")
+    boundary = f"----TrackerBoundary{uuid.uuid4().hex}"
+
     headers = _h()
-    del headers["Content-Type"]
-    with open(path, "rb") as fh:
-        data = aiohttp.FormData()
-        data.add_field("file", fh, filename=fname)
-        async with session.post(f"{BASE}/v2/issues/{issue_key}/attachments",
-                                headers=headers, data=data) as r:
-            text = await r.text()
-            try:
-                return r.status, json.loads(text)
-            except json.JSONDecodeError:
-                return r.status, text
+    headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+
+    file_bytes = path.read_bytes()
+    head = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; '
+        f'filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}\r\n'
+        f"Content-Type: application/octet-stream\r\n\r\n"
+    ).encode("utf-8")
+    tail = f"\r\n--{boundary}--\r\n".encode("utf-8")
+    body = head + file_bytes + tail
+
+    async with session.post(f"{BASE}/v2/issues/{issue_key}/attachments",
+                            headers=headers, data=body) as r:
+        text = await r.text()
+        try:
+            return r.status, json.loads(text)
+        except json.JSONDecodeError:
+            return r.status, text
 
 
 # ── Tool dispatch ────────────────────────────────────────────────────
@@ -805,8 +866,16 @@ async def _dispatch(s, name, a):
 
     # ── Issues: write ────────────────────────────────────────
     if name == "issue_create":
-        body: dict = {"queue": a["queue"], "summary": a["summary"]}
-        for k in ("type", "description", "assignee", "priority", "parent", "tags"):
+        summary, err = _resolve_text(a, "summary", "summary_file")
+        if err: return _err(400, err)
+        if not summary:
+            return _err(400, "either summary or summary_file is required")
+        description, err = _resolve_text(a, "description", "description_file")
+        if err: return _err(400, err)
+        body: dict = {"queue": a["queue"], "summary": summary}
+        if description is not None:
+            body["description"] = description
+        for k in ("type", "assignee", "priority", "parent", "tags"):
             if a.get(k) is not None:
                 body[k] = a[k]
         if a.get("sprint"):
@@ -820,8 +889,16 @@ async def _dispatch(s, name, a):
 
     if name == "issue_update":
         iid = a.pop("issue_key")
+        summary, err = _resolve_text(a, "summary", "summary_file")
+        if err: return _err(400, err)
+        description, err = _resolve_text(a, "description", "description_file")
+        if err: return _err(400, err)
         body = {}
-        for k in ("summary", "description", "assignee", "priority", "type", "parent", "tags", "followers"):
+        if summary is not None:
+            body["summary"] = summary
+        if description is not None:
+            body["description"] = description
+        for k in ("assignee", "priority", "type", "parent", "tags", "followers"):
             if a.get(k) is not None:
                 body[k] = a[k]
         if a.get("sprint"):
@@ -851,12 +928,8 @@ async def _dispatch(s, name, a):
         return _ok({"executed": tid, "result": data})
 
     if name == "issue_add_comment":
-        text = a.get("text")
-        if not text and a.get("text_file"):
-            try:
-                text = Path(a["text_file"]).read_text(encoding="utf-8")
-            except OSError as e:
-                return _err(400, f"text_file read error: {e}")
+        text, err = _resolve_text(a, "text", "text_file")
+        if err: return _err(400, err)
         if not text:
             return _err(400, "either text or text_file is required")
         body: dict = {"text": text}
@@ -868,7 +941,11 @@ async def _dispatch(s, name, a):
         return _ok(_fmt_comment(data))
 
     if name == "issue_update_comment":
-        st, data = await _patch(s, f"/v2/issues/{a['issue_key']}/comments/{a['comment_id']}", {"text": a["text"]})
+        text, err = _resolve_text(a, "text", "text_file")
+        if err: return _err(400, err)
+        if not text:
+            return _err(400, "either text or text_file is required")
+        st, data = await _patch(s, f"/v2/issues/{a['issue_key']}/comments/{a['comment_id']}", {"text": text})
         if st != 200:
             return _err(st, data)
         return _ok(_fmt_comment(data))
@@ -912,8 +989,10 @@ async def _dispatch(s, name, a):
 
     # ── Worklogs ─────────────────────────────────────────────
     if name == "issue_add_worklog":
+        comment, err = _resolve_text(a, "comment", "comment_file")
+        if err: return _err(400, err)
         body: dict = {"duration": a["duration"]}
-        if a.get("comment"): body["comment"] = a["comment"]
+        if comment: body["comment"] = comment
         if a.get("start"): body["start"] = a["start"]
         st, data = await _post(s, f"/v2/issues/{a['issue_key']}/worklogs", body)
         if st not in (200, 201):
@@ -921,9 +1000,11 @@ async def _dispatch(s, name, a):
         return _ok(_fmt_worklog(data))
 
     if name == "issue_update_worklog":
+        comment, err = _resolve_text(a, "comment", "comment_file")
+        if err: return _err(400, err)
         body: dict = {}
         if a.get("duration"): body["duration"] = a["duration"]
-        if a.get("comment"): body["comment"] = a["comment"]
+        if comment: body["comment"] = comment
         if a.get("start"): body["start"] = a["start"]
         if not body:
             return _err(400, "No fields to update")
@@ -1198,7 +1279,7 @@ async def _dispatch(s, name, a):
             return _err(st, data)
         return _ok(data)
 
-    return [TextContent(type="text", text=f"Unknown tool: {name}")]
+    return _err(404, f"Unknown tool: {name}")
 
 
 @server.call_tool()
@@ -1288,8 +1369,13 @@ def _cli_main():
         sys.exit(2)
 
     result = asyncio.run(_cli_call(tool, arguments))
+    had_error = False
     for tc in result:
         print(tc.text)
+        if isinstance(tc.text, str) and tc.text.startswith(_ERROR_PREFIX):
+            had_error = True
+    if had_error:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
