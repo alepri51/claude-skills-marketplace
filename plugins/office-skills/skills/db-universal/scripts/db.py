@@ -12,10 +12,15 @@ Universal DB Inspector CLI + MCP — MySQL, PostgreSQL, ClickHouse, Redis, Mongo
 
 2) MCP (legacy): запуск без аргументов — stdio_server для MCP-клиента.
 
-Параметры подключения берутся из:
-- --connection <name> → config/connections.json (резолвит ${VAR} из .env)
-- аргументы tool'а (host/port/user/password/database/db_type)
-- переменные окружения DB_HOST/DB_PORT/…
+Параметры подключения берутся ТОЛЬКО из .env в директории, откуда запущен скилл
+(поиск снизу вверх до 8 уровней). Никаких JSON-реестров внутри скилла.
+
+Формат env-переменных:
+  DB_<PREFIX>_HOST, DB_<PREFIX>_PORT, DB_<PREFIX>_USER, DB_<PREFIX>_PASSWORD,
+  DB_<PREFIX>_NAME, DB_<PREFIX>_TYPE, (опц.) DB_<PREFIX>_SSLMODE
+
+Имя для --connection — это <prefix> в нижнем регистре с '_'→'-'.
+Пример: ключи DB_PARSING_DEV_* → --connection db-parsing-dev.
 
 Инструменты: db_tables, db_schema, db_query, db_keys, db_get
 """
@@ -30,13 +35,13 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-# ── Config: .env, connections.json, var refs ──────────────────────────────
+# ── Config: .env discovery, named connections from env ────────────────────
 
 _SKILL_ROOT = Path(__file__).resolve().parent.parent   # .../db-universal
 
 
 def _find_env() -> Path | None:
-    """Ищет .env от cwd вверх по дереву (до 8 уровней). Fallback — рядом со скилом."""
+    """Ищет .env от cwd вверх по дереву (до 8 уровней)."""
     cur = Path.cwd().resolve()
     for _ in range(8):
         cand = cur / ".env"
@@ -45,8 +50,7 @@ def _find_env() -> Path | None:
         if cur.parent == cur:
             break
         cur = cur.parent
-    cand = _SKILL_ROOT / ".env"
-    return cand if cand.exists() else None
+    return None
 
 
 _env_path = _find_env()
@@ -65,44 +69,69 @@ if _env_path is not None:
             if k and (k not in os.environ or not os.environ[k]):
                 os.environ[k] = v
 
-_VAR_REF_RE = re.compile(r'^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$')
 
-def _resolve_var_ref(value):
-    """Резолвит значение вида "${VAR_NAME}" из os.environ."""
-    if not isinstance(value, str):
-        return value
-    m = _VAR_REF_RE.match(value)
-    if m and m.group(1) in os.environ:
-        return os.environ[m.group(1)]
-    return value
+_CONN_FIELDS = {
+    "host":     "HOST",
+    "port":     "PORT",
+    "user":     "USER",
+    "password": "PASSWORD",
+    "database": "NAME",
+    "db_type":  "TYPE",
+    "sslmode":  "SSLMODE",
+}
+
+
+def _name_to_prefix(name: str) -> str:
+    # db-parsing-dev -> DB_PARSING_DEV
+    return name.strip().upper().replace("-", "_")
+
+
+def _prefix_to_name(prefix: str) -> str:
+    # DB_PARSING_DEV -> db-parsing-dev
+    return prefix.lower().replace("_", "-")
 
 
 def _load_named_connection(name: str) -> dict:
-    """Читает config/connections.json и возвращает параметры подключения по имени.
+    """Собирает параметры подключения из env по префиксу.
 
-    Значения вида "${VAR_NAME}" резолвятся из .env/окружения.
-    Возвращает пустой dict, если имя не найдено или файла нет.
+    Имя 'db-parsing-dev' → префикс 'DB_PARSING_DEV',
+    ключи: DB_PARSING_DEV_HOST / _PORT / _USER / _PASSWORD / _NAME / _TYPE / _SSLMODE.
+    Возвращает пустой dict, если нет ни HOST, ни TYPE для префикса.
     """
-    cfg_path = _SKILL_ROOT / "config" / "connections.json"
-    if not cfg_path.exists():
+    prefix = _name_to_prefix(name)
+    out: dict = {}
+    for field, suffix in _CONN_FIELDS.items():
+        val = os.environ.get(f"{prefix}_{suffix}")
+        if val is not None and val != "":
+            out[field] = val
+    if not out.get("host") and not out.get("db_type"):
         return {}
-    try:
-        data = json.loads(cfg_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
-    raw = data.get(name) or {}
-    return {k: _resolve_var_ref(v) for k, v in raw.items()}
+    return out
+
+
+def _discover_connections_from_env() -> list[str]:
+    """Сканирует env, группирует ключи DB_<PREFIX>_<FIELD> и возвращает имена."""
+    suffixes = tuple(f"_{s}" for s in _CONN_FIELDS.values())
+    prefixes: set[str] = set()
+    for key in os.environ.keys():
+        if not key.startswith("DB_"):
+            continue
+        for suf in suffixes:
+            if key.endswith(suf) and len(key) > len(suf) + 3:
+                prefixes.add(key[: -len(suf)])
+                break
+    return sorted(_prefix_to_name(p) for p in prefixes)
 
 
 server = Server("db-universal")
 
 DEFAULTS = {
-    "host":     _resolve_var_ref(os.environ.get("DB_HOST", "localhost")),
-    "port":     _resolve_var_ref(os.environ.get("DB_PORT", "")),
-    "user":     _resolve_var_ref(os.environ.get("DB_USER", "")),
-    "password": _resolve_var_ref(os.environ.get("DB_PASSWORD", "")),
-    "database": _resolve_var_ref(os.environ.get("DB_NAME", "")),
-    "db_type":  _resolve_var_ref(os.environ.get("DB_TYPE", "mysql")),
+    "host":     os.environ.get("DB_HOST", "localhost"),
+    "port":     os.environ.get("DB_PORT", ""),
+    "user":     os.environ.get("DB_USER", ""),
+    "password": os.environ.get("DB_PASSWORD", ""),
+    "database": os.environ.get("DB_NAME", ""),
+    "db_type":  os.environ.get("DB_TYPE", "mysql"),
 }
 
 CONN_SCHEMA = {
@@ -191,10 +220,14 @@ async def mysql_query(args, sql):
 
 def _pg(args):
     import psycopg2, psycopg2.extras
-    return psycopg2.connect(
+    kwargs = dict(
         host=R(args, "host"), port=port_of(args, "postgres"),
         user=R(args, "user"), password=R(args, "password"), dbname=R(args, "database"),
     )
+    sslmode = args.get("sslmode") or DEFAULTS.get("sslmode")
+    if sslmode:
+        kwargs["sslmode"] = sslmode
+    return psycopg2.connect(**kwargs)
 
 async def pg_tables(args, pattern):
     c = _pg(args); cur = c.cursor()
@@ -404,14 +437,16 @@ def _cli_main():
 
     tool = argv[0]
 
-    # Список подключений из config/connections.json
+    # Список подключений, обнаруженных в .env
     if tool == "list-connections":
-        cfg_path = _SKILL_ROOT / "config" / "connections.json"
-        if not cfg_path.exists():
-            print("config/connections.json не найден")
+        names = _discover_connections_from_env()
+        if not names:
+            print(
+                "В .env не найдено подключений (ожидаются ключи "
+                "DB_<PREFIX>_HOST / _PORT / _USER / _PASSWORD / _NAME / _TYPE / [_SSLMODE])",
+                file=sys.stderr,
+            )
             sys.exit(1)
-        data = json.loads(cfg_path.read_text(encoding="utf-8"))
-        names = [k for k in data.keys() if not k.startswith("_")]
         print(json.dumps(names, indent=2))
         sys.exit(0)
 
@@ -469,7 +504,13 @@ def _cli_main():
     if connection:
         conn = _load_named_connection(connection)
         if not conn:
-            print(f"Error: connection '{connection}' не найдено в config/connections.json", file=sys.stderr)
+            prefix = _name_to_prefix(connection)
+            print(
+                f"Error: подключение '{connection}' не найдено в .env "
+                f"(ожидаются ключи {prefix}_HOST, {prefix}_TYPE, {prefix}_USER, "
+                f"{prefix}_PASSWORD, {prefix}_NAME, {prefix}_PORT, [{prefix}_SSLMODE])",
+                file=sys.stderr,
+            )
             sys.exit(1)
         for k, v in conn.items():
             arguments.setdefault(k, v)

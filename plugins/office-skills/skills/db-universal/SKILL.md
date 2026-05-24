@@ -9,8 +9,11 @@ description: >
   «сколько строк в events», «какие индексы на заказах», «EXPLAIN для запроса»,
   «проверь, есть ли поле X в БД», «исследуй БД сервиса bnmap». Скилл НЕ пишет
   в БД — разрешены только SELECT/EXPLAIN/SHOW/DESCRIBE; любой DML/DDL
-  блокируется. Подключения к именованным БД (db-parsing-dev, db-bnmap-prod
-  и т.д.) берутся из config/connections.json, креденшлы — из корневого .env.
+  блокируется. Подключения берутся ТОЛЬКО из .env в директории, откуда
+  запущен скилл (поиск снизу вверх). Формат:
+  DB_<PREFIX>_HOST / _PORT / _USER / _PASSWORD / _NAME / _TYPE / [_SSLMODE].
+  Имя для --connection — это <prefix> в нижнем регистре с '_'→'-'
+  (пример: ключи DB_PARSING_DEV_* → --connection db-parsing-dev).
 compatibility: >
   Требуется Python 3.10+ и пакеты под нужные движки:
     aiohttp, python-dotenv, mcp
@@ -65,9 +68,38 @@ python .claude/skills/db-universal/scripts/db.py <tool> '<json_args>' --connecti
 
 - `<tool>` — одно из `db_tables`, `db_schema`, `db_query`, `db_keys`, `db_get`.
 - `<json_args>` — JSON со входами инструмента (`pattern`, `table`, `sql`, `key`).
-- `--connection <name>` — именованное подключение из
-  `config/connections.json` (см. список подключений командой
+- `--connection <name>` — имя подключения; параметры берутся из `.env`
+  пользователя по префиксу `DB_<NAME_UPPER_С_'-'→'_'>_*` (см. список
+  обнаруженных подключений командой
   `python .claude/skills/db-universal/scripts/db.py list-connections`).
+
+### Формат `.env`
+
+Скилл ищет `.env` снизу вверх от cwd (до 8 уровней). Подключения
+описываются группами переменных с общим префиксом `DB_<PREFIX>_`:
+
+```
+# MySQL
+DB_PARSING_DEV_HOST=db.example.com
+DB_PARSING_DEV_PORT=3306
+DB_PARSING_DEV_USER=readonly
+DB_PARSING_DEV_PASSWORD=...
+DB_PARSING_DEV_NAME=price-parsing-dev
+DB_PARSING_DEV_TYPE=mysql
+
+# PostgreSQL c SSL
+DB_DOMBACKEND_PROD_HOST=api.example.com
+DB_DOMBACKEND_PROD_PORT=5575
+DB_DOMBACKEND_PROD_USER=readonly
+DB_DOMBACKEND_PROD_PASSWORD=...
+DB_DOMBACKEND_PROD_NAME=main
+DB_DOMBACKEND_PROD_TYPE=postgres
+DB_DOMBACKEND_PROD_SSLMODE=prefer
+```
+
+Тогда `--connection db-parsing-dev` и `--connection db-dombackend-prod`
+резолвятся напрямую из этих переменных. Никаких JSON-файлов внутри
+скилла больше нет.
 
 Примеры:
 
@@ -105,7 +137,8 @@ python .claude/skills/db-universal/scripts/db.py \
 
 1. **Определить подключение** — `list-connections`, сверить с тем, что
    в задаче/документации сервиса. Если нужного подключения нет —
-   добавить в `config/connections.json` по инструкции в `config/README.md`.
+   добавить группу переменных `DB_<PREFIX>_*` в `.env` пользователя
+   (см. раздел «Формат `.env`» выше).
 2. **Обзор таблиц** — `db_tables '{"pattern":"%"}' --connection <name>`.
 3. **Схемы ключевых таблиц** — `db_schema` по каждой релевантной таблице.
    Для MySQL сразу видны индексы и размер.
@@ -128,11 +161,10 @@ python .claude/skills/db-universal/scripts/db.py \
 
 Если:
 
-- **нет нужного подключения в `connections.json`** → скрипт вернёт
-  ошибку с именем. Добавь подключение по инструкции в
-  `config/README.md`.
-- **нет переменных в `.env`** → переменная `${X}` уйдёт в драйвер
-  как есть и тот выдаст TCP-ошибку. Проверь `.env` и перезапусти.
+- **нет переменных `DB_<PREFIX>_*` в `.env`** → скрипт вернёт ошибку
+  с перечнем ожидаемых ключей. Добавь группу в `.env` пользователя.
+- **`.env` не найден** → проверь, что запускаешь из директории, в
+  которой (или выше которой) лежит `.env`.
 - **не установлен драйвер** (например `psycopg2`) → `ImportError` с
   именем пакета. Установи пакет из `compatibility` выше.
 
